@@ -21,6 +21,26 @@
             --text-primary: #e8f4f8;
             --text-secondary: #a0c4d4;
             --border: #2d5a7b;
+            --land-fill: #4ecdc4;
+            --land-hover: #ff6b35;
+            --ocean-fill: transparent;
+            --graticule-stroke: rgba(160, 196, 212, 0.2);
+        }
+
+        [data-theme="light"] {
+            --bg-deep: #f5e6c8;
+            --bg-mid: #efe0c0;
+            --bg-surface: #e8d5b0;
+            --accent-warm: #8b4513;
+            --accent-cool: #5d4e37;
+            --accent-gold: #c4a35a;
+            --text-primary: #3d2b1f;
+            --text-secondary: #6b5344;
+            --border: #c4a574;
+            --land-fill: #c9a66b;
+            --land-hover: #8b4513;
+            --ocean-fill: #d4c4a8;
+            --graticule-stroke: rgba(139, 69, 19, 0.3);
         }
 
         * {
@@ -50,6 +70,12 @@
                 radial-gradient(circle at 80% 80%, rgba(255, 107, 53, 0.1) 0%, transparent 50%);
             pointer-events: none;
             z-index: 0;
+        }
+
+        [data-theme="light"]::before {
+            background-image:
+                radial-gradient(circle at 20% 50%, rgba(139, 69, 19, 0.08) 0%, transparent 50%),
+                radial-gradient(circle at 80% 80%, rgba(196, 163, 90, 0.1) 0%, transparent 50%);
         }
 
         .container {
@@ -178,6 +204,46 @@
             box-shadow: 0 8px 24px rgba(45, 90, 123, 0.4);
         }
 
+        [data-theme="light"] button {
+            background: linear-gradient(135deg, #8b4513, #a0522d);
+        }
+
+        [data-theme="light"] button:hover {
+            box-shadow: 0 8px 24px rgba(139, 69, 19, 0.4);
+        }
+
+        [data-theme="light"] button.reset {
+            background: linear-gradient(135deg, #c4a574, #a08060);
+        }
+
+        .theme-toggle {
+            position: fixed;
+            top: 1.5rem;
+            right: 1.5rem;
+            z-index: 100;
+            background: var(--bg-surface);
+            border: 2px solid var(--border);
+            border-radius: 50%;
+            width: 48px;
+            height: 48px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 1.3rem;
+            padding: 0;
+        }
+
+        .theme-toggle:hover {
+            transform: scale(1.1);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+        }
+
+        [data-theme="light"] .theme-toggle {
+            background: var(--bg-surface);
+        }
+
         .info-text {
             color: var(--text-secondary);
             font-size: 0.9rem;
@@ -226,6 +292,10 @@
             pointer-events: none;
         }
 
+        [data-theme="light"] #map-container::before {
+            background: radial-gradient(circle, rgba(139, 69, 19, 0.04) 0%, transparent 70%);
+        }
+
         @keyframes rotate {
             from {
                 transform: rotate(0deg);
@@ -238,45 +308,36 @@
         #map {
             width: 100%;
             height: 700px;
-            cursor: crosshair;
+            cursor: grab;
             position: relative;
             z-index: 1;
         }
 
+        #map:active,
+        #map.dragging {
+            cursor: grabbing;
+        }
+
+        .ocean {
+            fill: var(--ocean-fill);
+            cursor: inherit;
+        }
+
         .land {
-            fill: var(--accent-cool);
+            fill: var(--land-fill);
             stroke: var(--bg-deep);
             stroke-width: 0.5px;
             transition: fill 0.3s ease;
         }
 
         .land:hover {
-            fill: var(--accent-warm);
+            fill: var(--land-hover);
         }
 
         .graticule {
             fill: none;
-            stroke: rgba(160, 196, 212, 0.2);
+            stroke: var(--graticule-stroke);
             stroke-width: 0.5px;
-        }
-
-        .pole-marker {
-            fill: var(--accent-gold);
-            stroke: var(--bg-deep);
-            stroke-width: 2px;
-            filter: drop-shadow(0 0 10px rgba(247, 183, 49, 0.6));
-            animation: pulse 2s ease-in-out infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% {
-                opacity: 1;
-                transform: scale(1);
-            }
-            50% {
-                opacity: 0.7;
-                transform: scale(1.1);
-            }
         }
 
         .loading {
@@ -338,6 +399,9 @@
     </style>
 </head>
 <body>
+    <button class="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark mode">
+        <span id="theme-icon">&#9728;</span>
+    </button>
     <div class="container">
         <header>
             <h1>Mercator Pole Explorer</h1>
@@ -352,7 +416,7 @@
             </div>
 
             <div class="info-text">
-                <strong>How to use:</strong> Click anywhere on the map to set that location as the new north pole,
+                <strong>How to use:</strong> Click or drag anywhere on the map to set that location as the new north pole,
                 or search for a city above. Watch how the Mercator projection distorts the world differently!
             </div>
 
@@ -375,6 +439,7 @@
         // Global variables
         let svg, projection, path, g, worldData;
         let currentPole = [0, -90]; // [longitude, latitude] for rotation
+        let isDragging = false;
 
         // City database with major cities worldwide
         const cities = {
@@ -444,11 +509,15 @@
             const width = document.getElementById('map').clientWidth;
             const height = 700;
 
-            // Create SVG
+            // Create SVG with drag behavior
             svg = d3.select('#map')
                 .append('svg')
                 .attr('width', width)
-                .attr('height', height);
+                .attr('height', height)
+                .call(d3.drag()
+                    .on('start', handleDragStart)
+                    .on('drag', handleDrag)
+                    .on('end', handleDragEnd));
 
             // Create projection
             projection = d3.geoMercator()
@@ -460,6 +529,13 @@
 
             // Create group for all map elements
             g = svg.append('g');
+
+            // Add ocean background rectangle that captures all clicks
+            g.append('rect')
+                .attr('class', 'ocean')
+                .attr('width', width)
+                .attr('height', height)
+                .on('click', handleMapClick);
 
             // Add graticule (grid lines)
             const graticule = d3.geoGraticule();
@@ -482,9 +558,6 @@
                         .attr('class', 'land')
                         .attr('d', path)
                         .on('click', handleMapClick);
-
-                    // Add pole marker
-                    addPoleMarker();
                 })
                 .catch(error => {
                     console.error('Error loading map data:', error);
@@ -492,37 +565,51 @@
                 });
         }
 
-        // Add pole marker to the map
-        function addPoleMarker() {
-            // Remove existing marker
-            g.selectAll('.pole-marker').remove();
-
-            // The pole is at latitude 90 in the rotated coordinate system
-            // In the original coordinates, this is at currentPole
-            const poleCoords = [-currentPole[0], -currentPole[1]];
-            const projected = projection(poleCoords);
-
-            if (projected) {
-                g.append('circle')
-                    .attr('class', 'pole-marker')
-                    .attr('cx', projected[0])
-                    .attr('cy', projected[1])
-                    .attr('r', 8);
-            }
-        }
-
         // Handle map click
         function handleMapClick(event, d) {
+            // Don't handle click if we just finished dragging
+            if (isDragging) return;
+
             const coords = projection.invert(d3.pointer(event));
             if (coords) {
                 setPole(coords[0], coords[1]);
             }
         }
 
-        // Set new pole location
+        // Handle drag start
+        function handleDragStart(event) {
+            isDragging = true;
+            document.getElementById('map').classList.add('dragging');
+        }
+
+        // Handle drag movement
+        function handleDrag(event) {
+            const coords = projection.invert([event.x, event.y]);
+            if (coords && !isNaN(coords[0]) && !isNaN(coords[1])) {
+                // Clamp latitude to avoid issues near poles
+                const lat = Math.max(-85, Math.min(85, coords[1]));
+                setPoleImmediate(coords[0], lat);
+            }
+        }
+
+        // Handle drag end
+        function handleDragEnd(event) {
+            document.getElementById('map').classList.remove('dragging');
+            // Small delay before allowing clicks again
+            setTimeout(() => { isDragging = false; }, 100);
+        }
+
+        // Set new pole location (with animation)
         function setPole(lon, lat) {
             currentPole = [lon, -lat]; // Negative because we're rotating TO this point
             updateProjection();
+            updatePoleInfo(lon, lat);
+        }
+
+        // Set new pole location immediately (no animation, for dragging)
+        function setPoleImmediate(lon, lat) {
+            currentPole = [lon, -lat];
+            updateProjectionImmediate();
             updatePoleInfo(lon, lat);
         }
 
@@ -551,9 +638,28 @@
                 .transition()
                 .duration(1000)
                 .attr('d', path);
+        }
 
-            // Update pole marker after animation
-            setTimeout(addPoleMarker, 1000);
+        // Update the projection immediately (no animation, for dragging)
+        function updateProjectionImmediate() {
+            const width = document.getElementById('map').clientWidth;
+            const height = 700;
+
+            projection = d3.geoMercator()
+                .rotate(currentPole)
+                .scale(width / (2 * Math.PI))
+                .translate([width / 2, height / 2]);
+
+            path = d3.geoPath().projection(projection);
+
+            // Update all paths immediately (no transition)
+            const graticule = d3.geoGraticule();
+
+            g.select('.graticule')
+                .attr('d', path.projection(projection)(graticule()));
+
+            g.selectAll('.land')
+                .attr('d', path);
         }
 
         // Update pole information display
@@ -605,6 +711,20 @@
             // Initialize the map
             init();
         });
+
+        // Theme toggle function
+        function toggleTheme() {
+            const body = document.body;
+            const icon = document.getElementById('theme-icon');
+
+            if (body.getAttribute('data-theme') === 'light') {
+                body.removeAttribute('data-theme');
+                icon.innerHTML = '&#9728;'; // Sun icon for dark mode
+            } else {
+                body.setAttribute('data-theme', 'light');
+                icon.innerHTML = '&#9790;'; // Moon icon for light mode
+            }
+        }
 
         // Handle window resize
         let resizeTimer;
