@@ -308,14 +308,19 @@
         #map {
             width: 100%;
             height: 700px;
-            cursor: crosshair;
+            cursor: grab;
             position: relative;
             z-index: 1;
         }
 
+        #map:active,
+        #map.dragging {
+            cursor: grabbing;
+        }
+
         .ocean {
             fill: var(--ocean-fill);
-            cursor: crosshair;
+            cursor: inherit;
         }
 
         .land {
@@ -411,7 +416,7 @@
             </div>
 
             <div class="info-text">
-                <strong>How to use:</strong> Click anywhere on the map to set that location as the new north pole,
+                <strong>How to use:</strong> Click or drag anywhere on the map to set that location as the new north pole,
                 or search for a city above. Watch how the Mercator projection distorts the world differently!
             </div>
 
@@ -434,6 +439,7 @@
         // Global variables
         let svg, projection, path, g, worldData;
         let currentPole = [0, -90]; // [longitude, latitude] for rotation
+        let isDragging = false;
 
         // City database with major cities worldwide
         const cities = {
@@ -503,11 +509,15 @@
             const width = document.getElementById('map').clientWidth;
             const height = 700;
 
-            // Create SVG
+            // Create SVG with drag behavior
             svg = d3.select('#map')
                 .append('svg')
                 .attr('width', width)
-                .attr('height', height);
+                .attr('height', height)
+                .call(d3.drag()
+                    .on('start', handleDragStart)
+                    .on('drag', handleDrag)
+                    .on('end', handleDragEnd));
 
             // Create projection
             projection = d3.geoMercator()
@@ -557,16 +567,49 @@
 
         // Handle map click
         function handleMapClick(event, d) {
+            // Don't handle click if we just finished dragging
+            if (isDragging) return;
+
             const coords = projection.invert(d3.pointer(event));
             if (coords) {
                 setPole(coords[0], coords[1]);
             }
         }
 
-        // Set new pole location
+        // Handle drag start
+        function handleDragStart(event) {
+            isDragging = true;
+            document.getElementById('map').classList.add('dragging');
+        }
+
+        // Handle drag movement
+        function handleDrag(event) {
+            const coords = projection.invert([event.x, event.y]);
+            if (coords && !isNaN(coords[0]) && !isNaN(coords[1])) {
+                // Clamp latitude to avoid issues near poles
+                const lat = Math.max(-85, Math.min(85, coords[1]));
+                setPoleImmediate(coords[0], lat);
+            }
+        }
+
+        // Handle drag end
+        function handleDragEnd(event) {
+            document.getElementById('map').classList.remove('dragging');
+            // Small delay before allowing clicks again
+            setTimeout(() => { isDragging = false; }, 100);
+        }
+
+        // Set new pole location (with animation)
         function setPole(lon, lat) {
             currentPole = [lon, -lat]; // Negative because we're rotating TO this point
             updateProjection();
+            updatePoleInfo(lon, lat);
+        }
+
+        // Set new pole location immediately (no animation, for dragging)
+        function setPoleImmediate(lon, lat) {
+            currentPole = [lon, -lat];
+            updateProjectionImmediate();
             updatePoleInfo(lon, lat);
         }
 
@@ -594,6 +637,28 @@
             g.selectAll('.land')
                 .transition()
                 .duration(1000)
+                .attr('d', path);
+        }
+
+        // Update the projection immediately (no animation, for dragging)
+        function updateProjectionImmediate() {
+            const width = document.getElementById('map').clientWidth;
+            const height = 700;
+
+            projection = d3.geoMercator()
+                .rotate(currentPole)
+                .scale(width / (2 * Math.PI))
+                .translate([width / 2, height / 2]);
+
+            path = d3.geoPath().projection(projection);
+
+            // Update all paths immediately (no transition)
+            const graticule = d3.geoGraticule();
+
+            g.select('.graticule')
+                .attr('d', path.projection(projection)(graticule()));
+
+            g.selectAll('.land')
                 .attr('d', path);
         }
 
